@@ -1,0 +1,9 @@
+node_modules
+.env
+.wallets.json
+state.json
+amazon-mcp/build
+amazon-mcp/amazonCookies.json*
+logs
+.claude/
+amazon-mcp/CLAUDE.md
