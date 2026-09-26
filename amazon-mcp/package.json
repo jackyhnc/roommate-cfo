@@ -1,0 +1,25 @@
+{
+  "name": "mcp-server-amazon",
+  "private": true,
+  "description": "Amazon Model Context Protocol Server",
+  "version": "1.0.0",
+  "main": "./build/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc && chmod -R 755 ./build",
+    "clean": "rm mocks/*_202*"
+  },
+  "files": [
+    "build"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.4.0",
+    "cheerio": "^1.1.0",
+    "puppeteer": "^24.10.2",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

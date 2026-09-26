@@ -1,0 +1,2 @@
+# Mark HTML mock files as vendored so they don't affect language statistics
+mocks/*.html linguist-vendored=true

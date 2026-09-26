@@ -1,0 +1,336 @@
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { z } from 'zod'
+import { getOrdersHistory } from './orders.js'
+import { getCartContent, addToCart, clearCart, removeFromCart } from './cart.js'
+import { getProductDetails, searchProducts } from './products.js'
+import { checkoutPreview, performPurchase } from './checkout.js'
+
+// Create server instance
+const server = new McpServer({
+  name: 'amazon',
+  version: '1.0.0',
+})
+
+server.tool('get-orders-history', 'Get orders history for a user', {}, async ({}) => {
+  let ordersHistory: Awaited<ReturnType<typeof getOrdersHistory>>
+  try {
+    ordersHistory = await getOrdersHistory()
+  } catch (error: any) {
+    console.error('[ERROR][get-orders-history] Error in get-orders-history tool:', error)
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `An error occurred while retrieving orders history. Error: ${error.message}`,
+        },
+      ],
+    }
+  }
+
+  if (!ordersHistory || ordersHistory.length === 0) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: 'No orders found.',
+        },
+      ],
+    }
+  }
+
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify(ordersHistory, null, 2),
+      },
+    ],
+  }
+})
+
+server.tool(
+  'get-cart-content',
+  'Get the current cart content for a user - Always provide the product link when you mention a product in the response',
+  {},
+  async ({}) => {
+    let cartContent: Awaited<ReturnType<typeof getCartContent>>
+    try {
+      cartContent = await getCartContent()
+    } catch (error: any) {
+      console.error('[ERROR][get-cart-content] Error in get-cart-content tool:', error)
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `An error occurred while retrieving cart content. Error: ${error.message}`,
+          },
+        ],
+      }
+    }
+
+    if (cartContent.isEmpty) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: 'Your Amazon cart is empty.',
+          },
+        ],
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(cartContent, null, 2),
+        },
+      ],
+    }
+  }
+)
+
+server.tool(
+  'add-to-cart',
+  'Add a product to the Amazon cart using ASIN - You should always ask for confirmation to the user before running this tool',
+  {
+    asin: z
+      .string()
+      .length(10, { message: 'ASIN must be a 10-character string.' })
+      .describe('The ASIN (Amazon Standard Identification Number) of the product to add to cart. Must be a 10-character string.'),
+  },
+  async ({ asin }) => {
+    let result: Awaited<ReturnType<typeof addToCart>>
+    try {
+      result = await addToCart(asin)
+    } catch (error: any) {
+      console.error('[ERROR][add-to-cart] Error in add-to-cart tool:', error)
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `An error occurred while adding product to cart. Error: ${error.message}`,
+          },
+        ],
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: result.success ? `✅ ${result.message}` : `❌ Failed to add product to cart: ${result.message}`,
+        },
+      ],
+    }
+  }
+)
+
+server.tool(
+  'remove-from-cart',
+  'Remove a single item from the Amazon cart by its ASIN, leaving all other items untouched - ' +
+    'Use this instead of clear-cart when you only want to drop or swap specific products. ' +
+    'You should always ask for confirmation to the user before running this tool',
+  {
+    asin: z
+      .string()
+      .length(10, { message: 'ASIN must be a 10-character string.' })
+      .describe('The ASIN (Amazon Standard Identification Number) of the product to remove from the cart. Must be a 10-character string.'),
+  },
+  async ({ asin }) => {
+    let result: Awaited<ReturnType<typeof removeFromCart>>
+    try {
+      result = await removeFromCart(asin)
+    } catch (error: any) {
+      console.error('[ERROR][remove-from-cart] Error in remove-from-cart tool:', error)
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `An error occurred while removing the item from cart. Error: ${error.message}`,
+          },
+        ],
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: result.success ? `✅ ${result.message}` : `❌ ${result.message}`,
+        },
+      ],
+    }
+  }
+)
+
+server.tool('clear-cart', 'Clear all items from the Amazon cart', {}, async ({}) => {
+  let result: Awaited<ReturnType<typeof clearCart>>
+  try {
+    result = await clearCart()
+  } catch (error: any) {
+    console.error('[ERROR][clear-cart] Error in clear-cart tool:', error)
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `An error occurred while clearing the cart. Error: ${error.message}`,
+        },
+      ],
+    }
+  }
+
+  return {
+    content: [
+      {
+        type: 'text',
+        text: result.message,
+      },
+    ],
+  }
+})
+
+server.tool(
+  'get-product-details',
+  'Get detailed information about a product using its ASIN - Always provide the product link when you mention a product in the response',
+  {
+    asin: z
+      .string()
+      .length(10, { message: 'ASIN must be a 10-character string.' })
+      .describe('The ASIN (Amazon Standard Identification Number) of the product to get details for. Must be a 10-character string.'),
+  },
+  async ({ asin }) => {
+    let result: Awaited<ReturnType<typeof getProductDetails>>
+    try {
+      result = await getProductDetails(asin)
+    } catch (error: any) {
+      console.error('[ERROR][get-product-details] Error in get-product-details tool:', error)
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `An error occurred while retrieving product details. Error: ${error.message}`,
+          },
+        ],
+      }
+    }
+
+    return {
+      content: result.mainImageBase64
+        ? [
+            {
+              type: 'text',
+              text: JSON.stringify(result.data, null, 2),
+            },
+            {
+              type: 'image',
+              data: result.mainImageBase64,
+              mimeType: 'image/jpeg',
+            },
+          ]
+        : [
+            {
+              type: 'text',
+              text: JSON.stringify(result.data, null, 2),
+            },
+          ],
+    }
+  }
+)
+
+server.tool(
+  'search-products',
+  'Search for products on Amazon using a search term - Returns a list of products matching the search term - Always provide the product link when you mention a product in the response',
+  {
+    searchTerm: z
+      .string()
+      .min(1, { message: 'Search term cannot be empty.' })
+      .describe('The search term to look for products on Amazon. For example: "collagen", "laptop", "books"'),
+  },
+  async ({ searchTerm }) => {
+    let result: Awaited<ReturnType<typeof searchProducts>>
+    try {
+      result = await searchProducts(searchTerm)
+    } catch (error: any) {
+      console.error('[ERROR][search-products] Error in search-products tool:', error)
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `An error occurred while searching for products. Error: ${error.message}`,
+          },
+        ],
+      }
+    }
+
+    if (!result || result.length === 0) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `No products found for search term "${searchTerm}".`,
+          },
+        ],
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    }
+  }
+)
+
+server.tool(
+  'checkout-preview',
+  'Go to checkout with the current cart and read the final order total (including tax and shipping) WITHOUT placing the order. ' +
+    'Returns JSON { total, items, url, screenshot }.',
+  {},
+  async ({}) => {
+    try {
+      const preview = await checkoutPreview()
+      return { content: [{ type: 'text', text: JSON.stringify(preview, null, 2) }] }
+    } catch (error: any) {
+      console.error('[ERROR][checkout-preview]', error)
+      return { content: [{ type: 'text', text: `An error occurred while previewing checkout. Error: ${error.message}` }], isError: true }
+    }
+  }
+)
+
+server.tool(
+  'perform-purchase',
+  'Checkout with the current cart and REALLY place the order using the saved address and payment method. ' +
+    'Refuses without clicking anything if the order total is above maxTotal. ' +
+    'Make sure the cart only contains what should be bought first. You should always get confirmation before running this tool. ' +
+    'Returns JSON { placed, total, orderNumber, items, reason?, screenshot }.',
+  {
+    maxTotal: z.number().positive().describe('Hard cap in USD for the order total including tax and shipping.'),
+    maxSubtotal: z.number().positive().optional().describe('Optional cap in USD for the items before tax and shipping.'),
+  },
+  async ({ maxTotal, maxSubtotal }) => {
+    try {
+      const result = await performPurchase(maxTotal, maxSubtotal)
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+    } catch (error: any) {
+      console.error('[ERROR][perform-purchase]', error)
+      return { content: [{ type: 'text', text: `An error occurred during checkout. Error: ${error.message}` }], isError: true }
+    }
+  }
+)
+
+// Start the server
+async function main() {
+  const transport = new StdioServerTransport()
+  await server.connect(transport)
+  console.error('[INFO] Amazon MCP Server running on stdio')
+}
+
+main().catch(error => {
+  console.error('[ERROR] Fatal error in main():', error)
+  process.exit(1)
+})
