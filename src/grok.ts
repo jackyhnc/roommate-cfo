@@ -12,6 +12,7 @@ export type Intent =
   | { type: 'deposit'; amount: number }
   | { type: 'cancel' }
   | { type: 'reply'; text: string }
+  | { type: 'image'; prompt: string; caption: string }
   | { type: 'ignore' }
 
 const grok = process.env.XAI_API_KEY
@@ -29,6 +30,7 @@ For each message, call exactly one tool:
 - Anyone asking who owes what, who's behind, or the pool balance -> show_balances.
 - A roommate saying they want to pay in / top up / send their share to the pool -> deposit, with the amount (if they say "my share" or "what I owe", use the amount they're short from the house snapshot).
 - Someone correcting or dropping a proposal that is still waiting on approval ("nvm", "cancel that", "actually it's $85") -> cancel. If they gave a corrected amount, the new proposal will come in a later message, so just cancel.
+- Someone asks you for a picture, image, meme, poster, drawing or anything visual -> generate_image. Write a vivid, specific prompt (style, subject, composition); weave in house details from the snapshot when it's about the house.
 - Anything else addressed to you (mentions "CFO", asks about bills, spending, history, rules, who paid what) -> reply, using the house snapshot below. Text like a chill roommate: all lowercase, super casual, short (one or two lines), light slang is fine (lol, rn, u, ngl), no markdown, no made-up numbers.
 - A photo that is not a bill -> reply briefly (same casual lowercase voice) saying you only handle bills and receipts.
 - Normal roommate chatter not meant for you -> ignore.
@@ -87,6 +89,21 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'generate_image',
+      description: 'Generate an image with Grok Imagine and send it to the group chat.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'Detailed image prompt' },
+          caption: { type: 'string', description: 'Short casual lowercase caption to send with it' },
+        },
+        required: ['prompt', 'caption'],
+      },
+    },
+  },
   { type: 'function', function: { name: 'ignore', description: 'Not meant for the CFO.', parameters: { type: 'object', properties: {} } } },
 ]
 
@@ -112,6 +129,8 @@ export async function understand(from: string, text: string, imagePath: string |
   try {
     const res = await grok.chat.completions.create({
       model: XAI_MODEL,
+      // Low reasoning: same answers on bills and intents, noticeably faster replies in the chat.
+      ...({ reasoning_effort: process.env.XAI_REASONING ?? 'low' } as object),
       messages: [
         { role: 'system', content: `${SYSTEM}\n\n${context}` },
         { role: 'user', content },
@@ -135,6 +154,8 @@ export async function understand(from: string, text: string, imagePath: string |
         return { type: 'cancel' }
       case 'reply':
         return { type: 'reply', text: args.text }
+      case 'generate_image':
+        return { type: 'image', prompt: args.prompt, caption: args.caption ?? '' }
       default:
         return { type: 'ignore' }
     }

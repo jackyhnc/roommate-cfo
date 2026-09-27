@@ -1,5 +1,6 @@
 import { APPROVAL_LIMIT, APPROVALS_NEEDED, ALLOWANCE_TOPUP, MONTHLY_CONTRIBUTION, ROOMMATES, HOUSE_RULES, KNOWN_BILLERS, CARDHOLDER, TAX_SHIPPING_ALLOWANCE } from './config.ts'
 import { understand, summarize } from './grok.ts'
+import { generateImage } from './images.ts'
 import { startTrip, activeTrip, type TripResult } from './shopping.ts'
 import { pay, payFromVault, poolBalances, rlusdBalance, txLink, wallet, ensurePayee } from './ledger.ts'
 import { splitBill, formatShares, fmt } from './split.ts'
@@ -110,6 +111,18 @@ async function processMessage(msg: Incoming, send: Send) {
     }
     case 'reply':
       return send(intent.text)
+    case 'image': {
+      // ~15s to generate, so post a status and let the chat keep going meanwhile.
+      await send(`🎨 generating that rn, gimme like 15 sec…`)
+      const t = Date.now()
+      void generateImage(intent.prompt)
+        .then((file) => {
+          console.log(`[image] ${((Date.now() - t) / 1000).toFixed(1)}s ${file} | ${intent.prompt}`)
+          return send(intent.caption || '🎨', [file])
+        })
+        .catch((e) => send(`image gen flopped (${(e as Error).message.slice(0, 80)}), try again`))
+      return
+    }
   }
 }
 
