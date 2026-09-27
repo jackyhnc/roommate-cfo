@@ -200,15 +200,28 @@ async function purchase(state: State, p: Pending, send: Send): Promise<void> {
   await send(`🛒 ok going shopping for a ${p.item} on ${p.store ?? 'amazon'}, budget ${fmt(p.amount)}. watch my screen 👀`)
 }
 
+function rememberTrip(p: Pending, r: TripResult) {
+  const s = loadState()
+  const outcome =
+    r.status === 'placed' ? `ordered for ${fmt(r.total)}` : r.status === 'stopped' ? `left at checkout (${fmt(r.total)})` : r.status === 'cancelled' ? 'cancelled' : `not bought: ${r.why}`
+  s.trips = [
+    ...(s.trips ?? []),
+    { item: p.item ?? p.label, picked: r.pick?.title, price: r.pick?.price, link: r.pick?.link, outcome, orderNumber: r.status === 'placed' ? r.orderNumber : undefined, at: new Date().toISOString() },
+  ].slice(-10)
+  saveState(s)
+}
+
 async function finishTrip(p: Pending, r: TripResult, send: Send) {
   console.log('[shopping]', r)
+  rememberTrip(p, r)
+  const link = r.pick ? `\n${r.pick.link}` : ''
   if (r.status === 'cancelled') return send(`🛑 stopped shopping, nothing bought`)
   const shots = 'screenshot' in r && r.screenshot ? [r.screenshot] : undefined
-  if (r.status === 'blocked' || r.status === 'failed') return send(`🛒 didn't buy the ${p.item}: ${r.why}. nothing charged`, shots)
-  if (r.status === 'stopped') return send(`🛒 ${r.item.slice(0, 80)} · ${fmt(r.total)} is sitting at checkout on ${r.site}. rehearsal mode (CHECKOUT=stop) so i didn't place it`, shots)
+  if (r.status === 'blocked' || r.status === 'failed') return send(`🛒 didn't buy the ${p.item}: ${r.why}. nothing charged${link}`, shots)
+  if (r.status === 'stopped') return send(`🛒 ${r.item.slice(0, 80)} · ${fmt(r.total)} is sitting at checkout on ${r.site}. rehearsal mode (CHECKOUT=stop) so i didn't place it${link}`, shots)
 
   const total = round(r.total)
-  await send(`📦 ordered! ${r.item.slice(0, 80)} · ${fmt(total)}${r.orderNumber ? ` · order #${r.orderNumber}` : ''} (${r.site})`, shots)
+  await send(`📦 ordered! ${r.item.slice(0, 80)} · ${fmt(total)}${r.orderNumber ? ` · order #${r.orderNumber}` : ''} (${r.site})${link}`, shots)
   const { shares } = splitBill('other', total)
   const settled: Pending = {
     ...p,
@@ -294,7 +307,8 @@ async function snapshot(state: State) {
     `Waiting on approval:\n${pending.join('\n') || '- nothing'}`,
     `Paid this month:\n${history.join('\n') || '- nothing yet'}`,
     `Rules:\n${HOUSE_RULES.map((r) => `- ${r}`).join('\n')}`,
-    `Shopping right now: ${activeTrip() ? `${activeTrip()!.item} (budget ${fmt(activeTrip()!.budget)}, stage: ${activeTrip()!.stage})` : 'nothing'}`,
+    `Shopping right now: ${activeTrip() ? `${activeTrip()!.item} (budget ${fmt(activeTrip()!.budget)}, stage: ${activeTrip()!.stage}${activeTrip()!.pick ? `, picked ${activeTrip()!.pick!.title} $${activeTrip()!.pick!.price} ${activeTrip()!.pick!.link}` : ''})` : 'nothing'}`,
+    `Recent shopping trips (share the link when asked):\n${(state.trips ?? []).slice(-6).map((t) => `- asked for "${t.item}": ${t.picked ? `${t.picked}${t.price ? ` $${t.price}` : ''} ${t.link ?? ''}` : 'nothing picked'} → ${t.outcome}${t.orderNumber ? ` (order #${t.orderNumber})` : ''}`).join('\n') || '- none'}`,
     `Earlier in the chat (summary): ${earlier || '(nothing yet)'}`,
     `Recent chat:\n${recent.join('\n') || '(none)'}`,
   ].join('\n')

@@ -43,7 +43,11 @@ export type State = {
   charged: Record<string, number>
   pending: Pending[]
   history: LedgerEntry[]
+  // Shopping trips (bought or not), so the agent can answer "what was that?" / "link?" later.
+  trips?: TripRecord[]
 }
+
+export type TripRecord = { item: string; picked?: string; price?: number; link?: string; outcome: string; orderNumber?: string | null; at: string }
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const WALLETS_FILE = path.join(ROOT, '.wallets.json')

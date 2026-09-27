@@ -21,14 +21,20 @@ const TAX_SHIPPING_ALLOWANCE = 0.25
 // Picking from a list doesn't need a reasoning model; this one answers in ~1s instead of ~4s.
 const PICK_MODEL = process.env.SHOPPER_MODEL ?? 'grok-4.20-0309-non-reasoning'
 
-export type TripResult =
+// What the sub-agent picked, carried on every result so the chat agent can always link to it.
+export type Picked = { title: string; price: number; link: string }
+
+export type TripResult = (
   | { status: 'placed'; item: string; total: number; orderNumber: string | null; site: string; screenshot?: string }
   | { status: 'stopped'; item: string; total: number; site: string; screenshot?: string }
   | { status: 'blocked'; why: string; screenshot?: string }
   | { status: 'failed'; why: string; screenshot?: string }
   | { status: 'cancelled' }
+) & { pick?: Picked }
 
-export type Trip = { item: string; budget: number; stage: string; cancel: () => void }
+export type Trip = { item: string; budget: number; stage: string; pick?: Picked; cancel: () => void }
+
+export const productLink = (asin: string) => `https://www.amazon.com/dp/${asin}`
 
 // Live transcript of the trip: printed to the terminal and appended to logs/shopping.log
 // (`tail -f logs/shopping.log` to watch).
@@ -118,6 +124,7 @@ export function startTrip(
     finished = true
     clearTimeout(timer)
     active = null
+    r = { ...r, pick: trip.pick }
     log(`=== trip done in ${((Date.now() - tripStart) / 1000).toFixed(1)}s:`, r)
     onDone(r)
   }
@@ -152,7 +159,8 @@ export function startTrip(
     const choice = await pick(opts.item, opts.budget, results)
     if ('gaveUp' in choice) return done({ status: 'blocked', why: choice.gaveUp })
     check()
-    onUpdate(`👀 going with: ${choice.title.slice(0, 80)} · $${choice.price.toFixed(2)}\n${choice.why}`)
+    trip.pick = { title: choice.title, price: choice.price, link: productLink(choice.asin) }
+    onUpdate(`👀 going with: ${choice.title.slice(0, 80)} · $${choice.price.toFixed(2)}\n${choice.why}\n${trip.pick.link}`)
 
     // 3. Cart.
     trip.stage = 'cart'
