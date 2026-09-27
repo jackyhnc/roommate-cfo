@@ -1,7 +1,7 @@
-import { APPROVAL_LIMIT, APPROVALS_NEEDED, ALLOWANCE_TOPUP, MONTHLY_CONTRIBUTION, ROOMMATES, HOUSE_RULES, KNOWN_BILLERS } from './config.ts'
+import { APPROVAL_LIMIT, APPROVALS_NEEDED, ALLOWANCE_TOPUP, MONTHLY_CONTRIBUTION, ROOMMATES, HOUSE_RULES, KNOWN_BILLERS, CARDHOLDER, TAX_SHIPPING_ALLOWANCE } from './config.ts'
 import { understand, summarize } from './grok.ts'
 import { startTrip, activeTrip, type TripResult } from './shopping.ts'
-import { pay, payFromVault, poolBalances, rlusdBalance, txLink, wallet } from './ledger.ts'
+import { pay, payFromVault, poolBalances, rlusdBalance, txLink, wallet, ensurePayee } from './ledger.ts'
 import { splitBill, formatShares, fmt } from './split.ts'
 import { loadState, saveState, loadWallets, type Pending, type State } from './state.ts'
 
@@ -188,15 +188,34 @@ async function vote(state: State, msg: Incoming, send: Send) {
 
 // Purchases: the chat agent hands the shopping to the browser sub-agent (its own process) and keeps
 // answering the chat meanwhile. When the trip ends, the vault settles the real order total on the XRPL.
+// Purchases: the vault loads the house card on-chain first (co-signed by the approvers), THEN the
+// agent shops with that card, then any unspent money goes back to the vault. No approval, no load,
+// no shopping.
 async function purchase(state: State, p: Pending, send: Send): Promise<void> {
   state.pending = state.pending.filter((x) => x.id !== p.id)
   saveState(state)
+  if (activeTrip()) return send(`already out shopping for something, one at a time lol. ask again after`)
+
+  const load = round(p.amount * (1 + TAX_SHIPPING_ALLOWANCE))
+  const { vault } = await poolBalances()
+  if (load > vault) return send(`vault only has ${fmt(vault)}, can't load ${fmt(load)} onto the house card for this`)
+  const card = wallet(await ensurePayee('House Card')).address
+  const loadHash = await payFromVault(
+    card,
+    load,
+    `house card load for ${p.item} | budget ${fmt(p.amount)} + tax/shipping room | policy: ${APPROVALS_NEEDED}-of-${ROOMMATES.length} approved by ${p.approvals.join(' + ')}`,
+    p.approvals,
+  )
+  p.loaded = load
+  p.loadHash = loadHash
+  await send(`🔒 vault loaded ${fmt(load)} onto the house card (${CARDHOLDER}) for the ${p.item}, signed on-chain by ${p.approvals.join(' + ')}\n${txLink(loadHash)}`)
+
   const started = startTrip(
     { item: p.item!, budget: p.amount, store: p.store, forHouse: ROOMMATES.map((x) => x.name).join(', ') },
     (text, attachments) => void send(text, attachments),
     (r) => exclusive(() => finishTrip(p, r, send)),
   )
-  if (!started) return send(`already out shopping for something, one at a time lol. ask again after`)
+  if (!started) return refundCard(p, p.loaded!, 'shopping never started', send)
   await send(`🛒 ok going shopping for a ${p.item} on ${p.store ?? 'amazon'}, budget ${fmt(p.amount)}. watch my screen 👀`)
 }
 
@@ -211,27 +230,42 @@ function rememberTrip(p: Pending, r: TripResult) {
   saveState(s)
 }
 
+// Sends unspent house-card money back to the vault on-chain.
+async function refundCard(p: Pending, amount: number, why: string, send: Send) {
+  if (!p.loaded || amount <= 0) return
+  const hash = await pay(loadWallets().payees['House Card'], wallet(loadWallets().vault).address, round(amount), `house card refund: ${why} | ${p.item}`)
+  await send(`↩️ sent ${fmt(amount)} back from the house card to the vault\n${txLink(hash)}`)
+}
+
 async function finishTrip(p: Pending, r: TripResult, send: Send) {
   console.log('[shopping]', r)
   rememberTrip(p, r)
   const link = r.pick ? `\n${r.pick.link}` : ''
-  if (r.status === 'cancelled') return send(`🛑 stopped shopping, nothing bought`)
   const shots = 'screenshot' in r && r.screenshot ? [r.screenshot] : undefined
-  if (r.status === 'blocked' || r.status === 'failed') return send(`🛒 didn't buy the ${p.item}: ${r.why}. nothing charged${link}`, shots)
-  if (r.status === 'stopped') return send(`🛒 ${r.item.slice(0, 80)} · ${fmt(r.total)} is sitting at checkout on ${r.site}. rehearsal mode (CHECKOUT=stop) so i didn't place it${link}`, shots)
+  if (r.status === 'cancelled') {
+    await send(`🛑 stopped shopping, nothing bought`)
+    return refundCard(p, p.loaded ?? 0, 'cancelled', send)
+  }
+  if (r.status === 'blocked' || r.status === 'failed') {
+    await send(`🛒 didn't buy the ${p.item}: ${r.why}. nothing charged${link}`, shots)
+    return refundCard(p, p.loaded ?? 0, 'not bought', send)
+  }
+  if (r.status === 'stopped') {
+    await send(`🛒 ${r.item.slice(0, 80)} · ${fmt(r.total)} is sitting at checkout on ${r.site}. rehearsal mode (CHECKOUT=stop) so i didn't place it${link}`, shots)
+    return refundCard(p, p.loaded ?? 0, 'rehearsal, not placed', send)
+  }
 
   const total = round(r.total)
-  await send(`📦 ordered! ${r.item.slice(0, 80)} · ${fmt(total)}${r.orderNumber ? ` · order #${r.orderNumber}` : ''} (${r.site})${link}`, shots)
+  await send(`📦 ordered on the house card! ${r.item.slice(0, 80)} · ${fmt(total)}${r.orderNumber ? ` · order #${r.orderNumber}` : ''} (${r.site})${link}`, shots)
+
+  // Book it: each roommate's share of the real total, recorded against the on-chain card load.
+  const state = loadState()
   const { shares } = splitBill('other', total)
-  const settled: Pending = {
-    ...p,
-    amount: total,
-    shares,
-    label: `${r.item.slice(0, 40)} ${fmt(total)}`,
-    memo: `${r.site} order${r.orderNumber ? ` #${r.orderNumber}` : ''} | ${formatShares(shares)}`,
-    item: undefined,
-  }
-  return execute(loadState(), settled, send)
+  for (const [n, v] of Object.entries(shares)) state.charged[n] = round((state.charged[n] ?? 0) + v)
+  state.history.push({ label: `${r.item.slice(0, 40)} ${fmt(total)}`, amount: total, shares, hash: p.loadHash!, signers: p.approvals, at: new Date().toISOString() })
+  saveState(state)
+  await send(`🧾 split evenly: ${formatShares(shares)}`)
+  return refundCard(p, round((p.loaded ?? 0) - total), `unspent after ${r.site} order${r.orderNumber ? ` #${r.orderNumber}` : ''}`, send)
 }
 
 async function execute(state: State, p: Pending, send: Send): Promise<void> {

@@ -26,6 +26,9 @@ export type Pending = {
   // Purchases: what the shopper should buy, and where.
   item?: string
   store?: string
+  // How much the vault loaded onto the house card for this purchase, and that transaction.
+  loaded?: number
+  loadHash?: string
 }
 
 export type LedgerEntry = {

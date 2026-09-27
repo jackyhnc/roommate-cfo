@@ -1,6 +1,6 @@
-import { Client, Wallet, multisign, convertStringToHex, type Payment, type SubmittableTransaction } from 'xrpl'
+import { Client, Wallet, multisign, convertStringToHex, type Payment, type SubmittableTransaction, type TrustSet } from 'xrpl'
 import { XRPL_URL, EXPLORER, RLUSD_MODE, RIPPLE_RLUSD_ISSUER, RLUSD_CURRENCY } from './config.ts'
-import { loadWallets, type Wallets } from './state.ts'
+import { loadWallets, saveWallets, type Wallets } from './state.ts'
 
 let client: Client | null = null
 
@@ -43,6 +43,24 @@ function assertSuccess(res: any) {
   const code = res.result.meta?.TransactionResult
   if (code !== 'tesSUCCESS') throw new Error(`XRPL tx failed: ${code}`)
   return res.result.hash as string
+}
+
+// Creates a payee account (faucet-funded, RLUSD trustline) the first time it's needed, so new payees
+// like the house card work without re-running the whole setup.
+export async function ensurePayee(name: string) {
+  const w = loadWallets()
+  if (w.payees[name]) return w.payees[name]
+  const c = await xrpl()
+  const created = (await c.fundWallet()).wallet
+  const trust: TrustSet = {
+    TransactionType: 'TrustSet',
+    Account: created.address,
+    LimitAmount: { currency: RLUSD_CURRENCY, issuer: rlusdIssuer(w), value: '1000000' },
+  }
+  await submit(trust, created)
+  w.payees[name] = created.seed!
+  saveWallets(w)
+  return created.seed!
 }
 
 export async function pay(fromSeed: string, to: string, amount: number, memo: string) {

@@ -37,7 +37,7 @@ export const HOUSE_RULES = [
 
 // Payee accounts created by `npm run setup`, keyed by the name the agent uses.
 // "Unverified Payee" stands in for any biller the house has never paid before.
-export const PAYEES = ['Metro Fiber', 'Bay Power & Light', 'Store', 'Unverified Payee'] as const
+export const PAYEES = ['Metro Fiber', 'Bay Power & Light', 'Store', 'Unverified Payee', 'House Card'] as const
 export type Payee = (typeof PAYEES)[number]
 
 // Compliance allowlist: the only billers the agent may pay on its own.
@@ -46,6 +46,12 @@ export const KNOWN_BILLERS: { payee: Payee; match: RegExp }[] = [
   { payee: 'Metro Fiber', match: /metro\s*fiber/i },
   { payee: 'Bay Power & Light', match: /bay\s*power/i },
 ]
+
+// The card the agent shops with (on Amazon). The vault loads it on-chain before every purchase and
+// takes back whatever isn't spent. In production this is a virtual card funded from the vault.
+export const CARDHOLDER = process.env.CARDHOLDER ?? 'jacky'
+// Room on top of the approved item budget for tax and shipping (matches the checkout cap).
+export const TAX_SHIPPING_ALLOWANCE = 0.25
 
 export const XRPL_URL = 'wss://s.altnet.rippletest.net:51233'
 export const EXPLORER = 'https://testnet.xrpl.org'
