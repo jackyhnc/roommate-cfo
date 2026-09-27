@@ -223,4 +223,4 @@ amazonCookies.json.bak*
 amazonCookies.json.*.bak
 mocks/*_202*.html
 mocks/*_202*.txt
-!mcp-server-amazon.log
+!mcp-server-amazon.log.chrome-profile/

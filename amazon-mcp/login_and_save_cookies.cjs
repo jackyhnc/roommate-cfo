@@ -75,6 +75,8 @@ async function isLoggedIn(page) {
 
 (async () => {
   const browser = await puppeteer.launch({
+    // Same profile the MCP server uses, so the session you create here is the one it shops with.
+    userDataDir: path.join(__dirname, ".chrome-profile"),
     headless: false,
     defaultViewport: null,
     args: [
@@ -123,7 +125,7 @@ async function isLoggedIn(page) {
 
   console.error("");
   console.error("============================================================");
-  if (!AUTOFILL) console.error("  Sign in to Amazon in the open window.");
+  if (!AUTOFILL) console.error("  Sign in to Amazon in the open window. Tick 'Keep me signed in'.");
   console.error("  If Amazon shows a CAPTCHA / OTP / 'verify this device' /");
   console.error("  'Keep me signed in?' page, finish it in the open window.");
   console.error("  The script auto-detects the logged-in homepage and saves");

@@ -1,4 +1,5 @@
 import fs from 'fs'
+import path from 'path'
 import puppeteer from 'puppeteer'
 import { COOKIES_FILE_PATH, AMAZON_COOKIES, IS_BROWSER_VISIBLE } from './config.js'
 
@@ -33,12 +34,18 @@ export function loadAmazonCookiesFile() {
 
 // One Chrome for the whole server lifetime; each tool call gets its own tab.
 // Launching a browser per call cost ~3-5s every time.
+export const PROFILE_DIR = path.join(new URL('.', import.meta.url).pathname, '..', '.chrome-profile')
+
 let sharedBrowser: Promise<puppeteer.Browser> | null = null
 
 async function getBrowser() {
   if (!sharedBrowser) {
     sharedBrowser = (async () => {
+      // A persistent profile (shared with login_and_save_cookies.cjs) keeps the session the way a normal
+      // browser does: Amazon's refreshed cookies are saved, so checkout doesn't ask to sign in again.
+      const freshProfile = !fs.existsSync(PROFILE_DIR)
       const browser = await puppeteer.launch({
+        userDataDir: PROFILE_DIR,
         headless: !IS_BROWSER_VISIBLE,
         devtools: false,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-web-security', '--disable-blink-features=AutomationControlled'],
@@ -46,7 +53,8 @@ async function getBrowser() {
         defaultViewport: null,
       })
       browser.on('disconnected', () => (sharedBrowser = null))
-      if (AMAZON_COOKIES?.length > 0) {
+      // Seed from the exported cookies only when the profile is new; otherwise its own cookies are fresher.
+      if (freshProfile && AMAZON_COOKIES?.length > 0) {
         await browser.setCookie(...AMAZON_COOKIES)
         console.error('[INFO] Set Amazon cookies in the browser')
       } else {
