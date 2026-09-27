@@ -186,9 +186,14 @@ export async function addToCart(asin: string): Promise<{ success: boolean; messa
 
     // Find and click the add to cart button
     try {
-      const button = await page.waitForSelector('#add-to-cart-button', { visible: true, timeout: 10000 })
-      // Page may still be hydrating; a DOM-level click works where a synthetic mouse click gets rejected.
-      await button!.evaluate(el => (el as HTMLElement).click())
+      // Some product pages keep the button inside a collapsed buying-options accordion (hidden but
+      // present), so wait for it to exist, not to be visible, then submit its form directly.
+      const button = await page.waitForSelector('#add-to-cart-button, #add-to-cart-button-ubb, input[name="submit.add-to-cart"]', { timeout: 10000 })
+      await button!.evaluate(el => {
+        const input = el as HTMLInputElement
+        if (input.form) input.form.requestSubmit(input)
+        else input.click()
+      })
       console.error('[INFO][add-to-cart] Clicked add to cart button')
     } catch (error) {
       throw new Error(`Could not find or click the add to cart button: ${error}`)
