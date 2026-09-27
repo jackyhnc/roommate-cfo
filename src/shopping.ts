@@ -138,7 +138,11 @@ export function startTrip(
 
   ;(async () => {
     // 1. Empty the cart and search at the same time.
-    const [, searchText] = await Promise.all([tool('clear-cart'), tool('search-products', { searchTerm: opts.item })])
+    const [cleared, searchText] = await Promise.all([tool('clear-cart'), tool('search-products', { searchTerm: opts.item })])
+    // Never shop on top of leftovers: a failed clear gets one retry, then the trip stops.
+    if (!/^(Successfully|No items)/i.test(cleared) && !/^(Successfully|No items)/i.test(await tool('clear-cart'))) {
+      return done({ status: 'failed', why: `couldn't empty the amazon cart first, so i'm not buying anything` })
+    }
     check()
     const results = parseJson<Result[]>(searchText)
     if (!results) return done({ status: 'failed', why: searchText.slice(0, 160) })

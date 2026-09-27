@@ -44,7 +44,7 @@ async function getBrowser() {
       // A persistent profile (shared with login_and_save_cookies.cjs) keeps the session the way a normal
       // browser does: Amazon's refreshed cookies are saved, so checkout doesn't ask to sign in again.
       const freshProfile = !fs.existsSync(PROFILE_DIR)
-      const browser = await puppeteer.launch({
+      const launch = () => puppeteer.launch({
         userDataDir: PROFILE_DIR,
         headless: !IS_BROWSER_VISIBLE,
         devtools: false,
@@ -52,6 +52,14 @@ async function getBrowser() {
         ignoreDefaultArgs: ['--enable-automation'],
         defaultViewport: null,
       })
+      let browser: puppeteer.Browser
+      try {
+        browser = await launch()
+      } catch {
+        // A Chrome that was killed leaves its profile lock behind; clear it and try once more.
+        for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) fs.rmSync(path.join(PROFILE_DIR, f), { force: true })
+        browser = await launch()
+      }
       browser.on('disconnected', () => (sharedBrowser = null))
       // Seed from the exported cookies only when the profile is new; otherwise its own cookies are fresher.
       if (freshProfile && AMAZON_COOKIES?.length > 0) {
@@ -62,6 +70,7 @@ async function getBrowser() {
       }
       return browser
     })()
+    sharedBrowser.catch(() => (sharedBrowser = null))
   }
   return sharedBrowser
 }
